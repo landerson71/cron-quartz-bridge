@@ -1,0 +1,10 @@
+[package]
+name = "cron-quartz-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Converts standard crontab lines to Quartz cron expressions with precise error positions"
+license = "MIT"
+
+[[bin]]
+name = "cronvert"
+path = "src/main.rs"
