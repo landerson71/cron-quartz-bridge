@@ -40,6 +40,26 @@ $ echo '*/5 * * * * /usr/bin/heartbeat' | cronvert
 0 */5 * * * ? /usr/bin/heartbeat
 ```
 
+Pass `-r`/`--reverse` to go the other way, reading Quartz 6-field
+expressions and printing the standard crontab equivalent:
+
+```
+$ echo '0 0 9 ? * MON-FRI /usr/bin/backup.sh' | cronvert -r
+0 9 * * MON-FRI /usr/bin/backup.sh
+```
+
+The seconds field has to be `0`, since standard cron has no sub-minute
+resolution:
+
+```
+$ echo '30 0 9 ? * MON-FRI /usr/bin/backup.sh' | cronvert -r
+error: standard cron has no seconds field; the seconds value must be 0 to convert
+  --> <stdin>:1:1
+  |
+1 | 30 0 9 ? * MON-FRI /usr/bin/backup.sh
+  | ^
+```
+
 Blank lines and lines starting with `#` are skipped, same as in a real
 crontab.
 
@@ -73,13 +93,12 @@ error: quartz has no way to express a schedule that fires on either a day-of-mon
 
 ## Current limitations
 
-- Only standard-to-Quartz conversion is implemented; the reverse direction
-  isn't wired up yet.
 - Numeric day-of-week ranges and steps (e.g. `1-5`) can't be re-numbered
-  automatically yet and are reported as an error. Weekday names (`MON-FRI`)
-  work fine, since Quartz uses the same names.
-- Only the 6-field Quartz form is produced; the optional 7th (year) field
-  isn't handled.
+  automatically yet and are reported as an error, in either direction.
+  Weekday names (`MON-FRI`) work fine, since both dialects use the same
+  names.
+- Only the 6-field Quartz form is accepted and produced; the optional 7th
+  (year) field isn't handled.
 
 ## Building
 

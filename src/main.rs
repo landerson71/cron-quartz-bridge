@@ -1,6 +1,7 @@
 mod convert;
 mod cron;
 mod error;
+mod quartz;
 
 use std::env;
 use std::fs;
@@ -13,12 +14,22 @@ fn main() -> ExitCode {
         print_usage();
         return ExitCode::SUCCESS;
     }
-    if args.len() > 2 {
+
+    let mut reverse = false;
+    let mut positional: Vec<String> = Vec::new();
+    for arg in args.iter().skip(1) {
+        if arg == "-r" || arg == "--reverse" {
+            reverse = true;
+        } else {
+            positional.push(arg.clone());
+        }
+    }
+    if positional.len() > 1 {
         print_usage();
         return ExitCode::from(2);
     }
 
-    let (source, file_label) = match args.get(1) {
+    let (source, file_label) = match positional.first() {
         Some(path) => match fs::read_to_string(path) {
             Ok(contents) => (contents, path.clone()),
             Err(e) => {
@@ -44,9 +55,13 @@ fn main() -> ExitCode {
             continue;
         }
 
-        let result = cron::parse_line(line, line_no).and_then(|schedule| convert::to_quartz(&schedule));
+        let result = if reverse {
+            quartz::parse_line(line, line_no).and_then(|schedule| convert::to_standard(&schedule))
+        } else {
+            cron::parse_line(line, line_no).and_then(|schedule| convert::to_quartz(&schedule))
+        };
         match result {
-            Ok(quartz) => println!("{}", quartz),
+            Ok(converted) => println!("{}", converted),
             Err(err) => {
                 had_error = true;
                 eprintln!("{}", err.render(line, &file_label));
@@ -62,8 +77,11 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: cronvert [FILE]");
+    eprintln!("usage: cronvert [-r|--reverse] [FILE]");
     eprintln!();
     eprintln!("Reads standard 5-field crontab lines from FILE (or stdin if omitted)");
     eprintln!("and prints the equivalent Quartz cron expression for each line.");
+    eprintln!();
+    eprintln!("With -r/--reverse, reads 6-field Quartz cron expressions instead and");
+    eprintln!("prints the equivalent standard crontab line for each one.");
 }
