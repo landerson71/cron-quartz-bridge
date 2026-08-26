@@ -93,10 +93,6 @@ error: quartz has no way to express a schedule that fires on either a day-of-mon
 
 ## Current limitations
 
-- Numeric day-of-week ranges and steps (e.g. `1-5`) can't be re-numbered
-  automatically yet and are reported as an error, in either direction.
-  Weekday names (`MON-FRI`) work fine, since both dialects use the same
-  names.
 - Only the 6-field Quartz form is accepted and produced; the optional 7th
   (year) field isn't handled.
 
