@@ -197,10 +197,22 @@ fn validate_seconds(field: &QuartzField, line: usize, col: usize) -> Result<(), 
     ))
 }
 
-/// Converts a Quartz (6-field) cron expression into a 5-field standard
+fn validate_year(field: &QuartzField, line: usize, col: usize) -> Result<(), CronError> {
+    if field.is_any() {
+        return Ok(());
+    }
+    Err(CronError::new(
+        line,
+        col,
+        "standard cron has no year field; the year value must be * (or omitted) to convert",
+    ))
+}
+
+/// Converts a Quartz (6- or 7-field) cron expression into a 5-field standard
 /// crontab line.
 pub fn to_standard(schedule: &QuartzSchedule) -> Result<String, CronError> {
     validate_seconds(&schedule.second, schedule.line, schedule.second_col)?;
+    validate_year(&schedule.year, schedule.line, schedule.year_col)?;
 
     let dom_is_unspecified = schedule.day_of_month.is_unspecified();
     let dow_is_unspecified = schedule.day_of_week.is_unspecified();

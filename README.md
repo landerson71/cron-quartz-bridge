@@ -60,6 +60,29 @@ error: standard cron has no seconds field; the seconds value must be 0 to conver
   | ^
 ```
 
+Quartz's optional 7th field (year) is accepted too. Since standard cron has
+no year field, it has to be `*` (or left out entirely) to convert back:
+
+```
+$ echo '0 0 9 ? * MON-FRI * /usr/bin/backup.sh' | cronvert -r
+0 9 * * MON-FRI /usr/bin/backup.sh
+
+$ echo '0 0 9 ? * 1 2025' | cronvert -r
+error: standard cron has no year field; the year value must be * (or omitted) to convert
+  --> <stdin>:1:13
+  |
+1 | 0 0 9 ? * 1 2025
+  |             ^
+```
+
+Because a command is optional after the year field and nothing in the
+syntax marks where the year ends and the command begins, `cronvert` reads
+the first trailing word as the year only if it actually parses as one
+(a number, range, step, list, or `*` in Quartz's 1970-2199 year bounds).
+A command that happens to start with a bare number in that range, e.g.
+`0 0 9 ? * MON-FRI 2025 backup.sh`, will be misread as having a year -
+there's no delimiter in Quartz's format to disambiguate that case.
+
 Blank lines and lines starting with `#` are skipped, same as in a real
 crontab.
 
@@ -93,8 +116,9 @@ error: quartz has no way to express a schedule that fires on either a day-of-mon
 
 ## Current limitations
 
-- Only the 6-field Quartz form is accepted and produced; the optional 7th
-  (year) field isn't handled.
+- Forward conversion (crontab to Quartz) never emits a year field, since
+  standard cron has no concept of one to carry over. Reverse conversion
+  accepts a 7th year field but requires it to be `*` to convert back.
 
 ## Building
 

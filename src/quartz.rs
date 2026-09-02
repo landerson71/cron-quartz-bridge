@@ -10,6 +10,7 @@ pub enum QuartzFieldKind {
     DayOfMonth,
     Month,
     DayOfWeek,
+    Year,
 }
 
 impl QuartzFieldKind {
@@ -21,6 +22,7 @@ impl QuartzFieldKind {
             QuartzFieldKind::DayOfMonth => "day-of-month",
             QuartzFieldKind::Month => "month",
             QuartzFieldKind::DayOfWeek => "day-of-week",
+            QuartzFieldKind::Year => "year",
         }
     }
 
@@ -34,6 +36,8 @@ impl QuartzFieldKind {
             // Quartz numbers Sunday as 1 and counts up, unlike standard
             // cron's 0-6 (with 7 as an alias for Sunday).
             QuartzFieldKind::DayOfWeek => (1, 7),
+            // Matches the range Quartz's own CronExpression validates against.
+            QuartzFieldKind::Year => (1970, 2199),
         }
     }
 
@@ -95,7 +99,7 @@ impl fmt::Display for QuartzField {
     }
 }
 
-/// A parsed Quartz (6-field) cron line, plus the source positions a
+/// A parsed Quartz (6- or 7-field) cron line, plus the source positions a
 /// conversion step needs to report its own errors.
 pub struct QuartzSchedule {
     pub second: QuartzField,
@@ -107,6 +111,8 @@ pub struct QuartzSchedule {
     pub month: QuartzField,
     pub day_of_week: QuartzField,
     pub day_of_week_col: usize,
+    pub year: QuartzField,
+    pub year_col: usize,
     pub line: usize,
     pub command: String,
 }
@@ -117,8 +123,10 @@ struct Token {
 }
 
 // Splits a line into up to six whitespace-delimited fields, keeping the
-// 1-based column each one starts at, plus whatever trails as the command.
-fn tokenize(line: &str) -> (Vec<Token>, String) {
+// 1-based column each one starts at, plus whatever trails, unparsed, as
+// `rest` (its own 1-based starting column included so callers can still
+// report accurate error positions against it).
+fn tokenize(line: &str) -> (Vec<Token>, usize, String) {
     let chars: Vec<char> = line.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0;
@@ -139,19 +147,46 @@ fn tokenize(line: &str) -> (Vec<Token>, String) {
     while i < chars.len() && chars[i].is_whitespace() {
         i += 1;
     }
-    let command: String = chars[i..].iter().collect::<String>().trim_end().to_string();
-    (tokens, command)
+    let rest: String = chars[i..].iter().collect();
+    (tokens, i + 1, rest)
+}
+
+// The optional 7th field and the command that may follow it share the same
+// trailing text, and nothing marks where one ends and the other begins.
+// We resolve that by trying to parse the first whitespace-delimited word
+// of `rest` as a year field; if it parses, it's the year and whatever
+// follows is the command, otherwise there's no year field and all of
+// `rest` is the command. A command that happens to start with a bare
+// number or a `*` will be misread as a year - there's no way around that
+// ambiguity without a delimiter Quartz doesn't have.
+fn split_year_and_command(rest: &str, rest_col: usize, line_no: usize) -> (QuartzField, usize, String) {
+    let chars: Vec<char> = rest.chars().collect();
+    let mut i = 0;
+    while i < chars.len() && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i == 0 {
+        return (QuartzField::Any, rest_col, String::new());
+    }
+    let candidate: String = chars[..i].iter().collect();
+
+    if let Ok(year) = parse_field(&candidate, rest_col, line_no, QuartzFieldKind::Year) {
+        let command: String = chars[i..].iter().collect::<String>().trim().to_string();
+        (year, rest_col, command)
+    } else {
+        (QuartzField::Any, rest_col, rest.trim_end().to_string())
+    }
 }
 
 pub fn parse_line(line: &str, line_no: usize) -> Result<QuartzSchedule, CronError> {
-    let (tokens, command) = tokenize(line);
+    let (tokens, rest_col, rest) = tokenize(line);
     if tokens.len() < 6 {
         let col = line.chars().count() + 1;
         return Err(CronError::new(
             line_no,
             col.max(1),
             format!(
-                "expected 6 fields (second minute hour day-of-month month day-of-week), found {}",
+                "expected 6 fields (second minute hour day-of-month month day-of-week), plus an optional year, found {}",
                 tokens.len()
             ),
         ));
@@ -163,6 +198,7 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<QuartzSchedule, CronErro
     let day_of_month = parse_field(&tokens[3].text, tokens[3].col, line_no, QuartzFieldKind::DayOfMonth)?;
     let month = parse_field(&tokens[4].text, tokens[4].col, line_no, QuartzFieldKind::Month)?;
     let day_of_week = parse_field(&tokens[5].text, tokens[5].col, line_no, QuartzFieldKind::DayOfWeek)?;
+    let (year, year_col, command) = split_year_and_command(&rest, rest_col, line_no);
 
     Ok(QuartzSchedule {
         second,
@@ -174,6 +210,8 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<QuartzSchedule, CronErro
         month,
         day_of_week,
         day_of_week_col: tokens[5].col,
+        year,
+        year_col,
         line: line_no,
         command,
     })
