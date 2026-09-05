@@ -296,3 +296,118 @@ fn parse_single(text: &str, col: usize, line_no: usize, kind: FieldKind) -> Resu
 
     Err(CronError::new(line_no, col, format!("invalid value '{}' for {}", text, kind.label())))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokenize_splits_five_fields_and_keeps_the_rest_as_command() {
+        let (tokens, command) = tokenize("0 9 * * 1 do the thing");
+        let cols: Vec<usize> = tokens.iter().map(|t| t.col).collect();
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, ["0", "9", "*", "*", "1"]);
+        assert_eq!(cols, [1, 3, 5, 7, 9]);
+        assert_eq!(command, "do the thing");
+    }
+
+    #[test]
+    fn tokenize_tolerates_irregular_whitespace() {
+        let (tokens, command) = tokenize("  0    9  *   *    1    echo hi  ");
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, ["0", "9", "*", "*", "1"]);
+        assert_eq!(command, "echo hi");
+    }
+
+    #[test]
+    fn parse_line_reports_missing_fields_at_end_of_line() {
+        let err = parse_line("0 9 *", 1).unwrap_err();
+        assert_eq!(err.pos.line, 1);
+        assert_eq!(err.pos.col, 6);
+        assert!(err.message.contains("found 3"));
+    }
+
+    #[test]
+    fn parse_line_accepts_a_full_valid_line() {
+        let schedule = parse_line("0 9 * * MON-FRI /usr/bin/backup.sh", 1).unwrap();
+        assert_eq!(schedule.minute.to_string(), "0");
+        assert_eq!(schedule.hour.to_string(), "9");
+        assert!(schedule.day_of_month.is_any());
+        assert!(schedule.month.is_any());
+        assert_eq!(schedule.day_of_week.to_string(), "MON-FRI");
+        assert_eq!(schedule.command, "/usr/bin/backup.sh");
+    }
+
+    #[test]
+    fn parse_field_wildcard_is_any() {
+        let field = parse_field("*", 1, 1, FieldKind::Minute).unwrap();
+        assert!(field.is_any());
+    }
+
+    #[test]
+    fn parse_field_rejects_out_of_range_number() {
+        let err = parse_field("99", 3, 1, FieldKind::Hour).unwrap_err();
+        assert_eq!(err.pos.col, 3);
+        assert!(err.message.contains("out of range for hour"));
+    }
+
+    #[test]
+    fn parse_field_accepts_day_of_week_alias_seven() {
+        let field = parse_field("7", 1, 1, FieldKind::DayOfWeek).unwrap();
+        assert_eq!(field.to_string(), "7");
+    }
+
+    #[test]
+    fn parse_field_matches_names_case_insensitively() {
+        let field = parse_field("mon-fri", 1, 1, FieldKind::DayOfWeek).unwrap();
+        assert_eq!(field.to_string(), "MON-FRI");
+    }
+
+    #[test]
+    fn parse_field_rejects_unknown_name() {
+        let err = parse_field("FOO", 5, 1, FieldKind::Month).unwrap_err();
+        assert_eq!(err.pos.col, 5);
+        assert!(err.message.contains("invalid value 'FOO' for month"));
+    }
+
+    #[test]
+    fn parse_field_rejects_reversed_range() {
+        let err = parse_field("10-5", 1, 1, FieldKind::Minute).unwrap_err();
+        assert_eq!(err.pos.col, 1);
+        assert!(err.message.contains("range start (10) is greater than range end (5)"));
+    }
+
+    #[test]
+    fn parse_field_rejects_zero_step() {
+        let err = parse_field("*/0", 1, 1, FieldKind::Minute).unwrap_err();
+        assert_eq!(err.pos.col, 3);
+        assert!(err.message.contains("greater than zero"));
+    }
+
+    #[test]
+    fn parse_field_rejects_non_numeric_step() {
+        let err = parse_field("1/a", 1, 1, FieldKind::Minute).unwrap_err();
+        assert_eq!(err.pos.col, 3);
+        assert!(err.message.contains("must be a positive integer"));
+    }
+
+    #[test]
+    fn parse_field_rejects_empty_atom_between_commas() {
+        let err = parse_field("1,,3", 1, 1, FieldKind::Minute).unwrap_err();
+        assert_eq!(err.pos.col, 3);
+        assert!(err.message.contains("expected a value here"));
+    }
+
+    #[test]
+    fn parse_field_reports_column_of_later_list_entries() {
+        let err = parse_field("1,99", 1, 1, FieldKind::Hour).unwrap_err();
+        assert_eq!(err.pos.col, 3);
+        assert!(err.message.contains("out of range for hour"));
+    }
+
+    #[test]
+    fn parse_field_allows_a_range_as_a_step_base() {
+        let field = parse_field("10-20/5", 1, 1, FieldKind::Minute).unwrap();
+        assert_eq!(field.to_string(), "10-20/5");
+    }
+}
