@@ -340,3 +340,140 @@ fn atom_numeric(atom: &AtomValue) -> u32 {
         AtomValue::Step(base, _) => atom_numeric(base),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokenize_splits_six_fields_and_keeps_the_rest() {
+        let (tokens, rest_col, rest) = tokenize("0 0 12 * * ? 2026 do the thing");
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_str()).collect();
+        let cols: Vec<usize> = tokens.iter().map(|t| t.col).collect();
+        assert_eq!(texts, ["0", "0", "12", "*", "*", "?"]);
+        assert_eq!(cols, [1, 3, 5, 7, 9, 11]);
+        assert_eq!(rest_col, 13);
+        assert_eq!(rest, "2026 do the thing");
+    }
+
+    #[test]
+    fn tokenize_stops_at_six_fields_even_with_more_tokens() {
+        let (tokens, _, rest) = tokenize("* * * * * * * *");
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(rest, "* *");
+    }
+
+    #[test]
+    fn split_year_and_command_finds_a_leading_year() {
+        let (year, year_col, command) = split_year_and_command("2026 /usr/bin/backup.sh", 13, 1);
+        assert_eq!(year.to_string(), "2026");
+        assert_eq!(year_col, 13);
+        assert_eq!(command, "/usr/bin/backup.sh");
+    }
+
+    #[test]
+    fn split_year_and_command_treats_star_as_a_year_when_alone() {
+        let (year, _, command) = split_year_and_command("* /usr/bin/backup.sh", 13, 1);
+        assert!(year.is_any());
+        assert_eq!(command, "/usr/bin/backup.sh");
+    }
+
+    #[test]
+    fn split_year_and_command_falls_back_when_first_word_is_not_a_year() {
+        let (year, _, command) = split_year_and_command("/usr/bin/backup.sh --now", 13, 1);
+        assert!(year.is_any());
+        assert_eq!(command, "/usr/bin/backup.sh --now");
+    }
+
+    #[test]
+    fn split_year_and_command_handles_empty_rest() {
+        let (year, year_col, command) = split_year_and_command("", 13, 1);
+        assert!(year.is_any());
+        assert_eq!(year_col, 13);
+        assert_eq!(command, "");
+    }
+
+    #[test]
+    fn split_year_and_command_rejects_out_of_range_year_as_a_year() {
+        // 1969 fails the year bounds check, so it's read as a command instead.
+        let (year, _, command) = split_year_and_command("1969 do the thing", 13, 1);
+        assert!(year.is_any());
+        assert_eq!(command, "1969 do the thing");
+    }
+
+    #[test]
+    fn parse_line_accepts_a_full_six_field_line() {
+        let schedule = parse_line("0 0 12 * * ? /usr/bin/backup.sh", 1).unwrap();
+        assert_eq!(schedule.second.to_string(), "0");
+        assert_eq!(schedule.hour.to_string(), "12");
+        assert!(schedule.day_of_month.is_any());
+        assert!(schedule.day_of_week.is_unspecified());
+        assert!(schedule.year.is_any());
+        assert_eq!(schedule.command, "/usr/bin/backup.sh");
+    }
+
+    #[test]
+    fn parse_line_accepts_an_optional_seventh_year_field() {
+        let schedule = parse_line("0 0 12 * * ? 2026 /usr/bin/backup.sh", 1).unwrap();
+        assert_eq!(schedule.year.to_string(), "2026");
+        assert_eq!(schedule.command, "/usr/bin/backup.sh");
+    }
+
+    #[test]
+    fn parse_line_reports_missing_fields_at_end_of_line() {
+        let err = parse_line("0 0 12 * *", 1).unwrap_err();
+        assert_eq!(err.pos.line, 1);
+        assert!(err.message.contains("found 5"));
+    }
+
+    #[test]
+    fn parse_field_question_mark_allowed_for_day_of_month() {
+        let field = parse_field("?", 1, 1, QuartzFieldKind::DayOfMonth).unwrap();
+        assert!(field.is_unspecified());
+    }
+
+    #[test]
+    fn parse_field_question_mark_allowed_for_day_of_week() {
+        let field = parse_field("?", 1, 1, QuartzFieldKind::DayOfWeek).unwrap();
+        assert!(field.is_unspecified());
+    }
+
+    #[test]
+    fn parse_field_question_mark_rejected_elsewhere() {
+        for kind in [
+            QuartzFieldKind::Second,
+            QuartzFieldKind::Minute,
+            QuartzFieldKind::Hour,
+            QuartzFieldKind::Month,
+            QuartzFieldKind::Year,
+        ] {
+            let err = parse_field("?", 4, 1, kind).unwrap_err();
+            assert_eq!(err.pos.col, 4);
+            assert!(err.message.contains("is not valid for"));
+        }
+    }
+
+    #[test]
+    fn parse_field_day_of_week_names_start_at_sunday_one() {
+        let field = parse_field("SUN", 1, 1, QuartzFieldKind::DayOfWeek).unwrap();
+        assert_eq!(field.to_string(), "SUN");
+        if let QuartzField::List(atoms) = field {
+            assert_eq!(atom_numeric(&atoms[0]), 1);
+        } else {
+            panic!("expected a list");
+        }
+    }
+
+    #[test]
+    fn parse_field_day_of_week_rejects_zero() {
+        let err = parse_field("0", 1, 1, QuartzFieldKind::DayOfWeek).unwrap_err();
+        assert!(err.message.contains("out of range for day-of-week"));
+    }
+
+    #[test]
+    fn parse_field_year_accepts_bounds() {
+        assert!(parse_field("1970", 1, 1, QuartzFieldKind::Year).is_ok());
+        assert!(parse_field("2199", 1, 1, QuartzFieldKind::Year).is_ok());
+        assert!(parse_field("2200", 1, 1, QuartzFieldKind::Year).is_err());
+    }
+}
