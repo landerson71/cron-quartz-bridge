@@ -127,6 +127,129 @@ pub fn to_quartz(schedule: &StandardSchedule) -> Result<String, CronError> {
     Ok(result)
 }
 
+#[cfg(test)]
+mod to_quartz_tests {
+    use super::*;
+    use crate::cron;
+
+    fn quartz_dow_of(cron_line: &str) -> String {
+        let schedule = cron::parse_line(cron_line, 1).unwrap();
+        let out = to_quartz(&schedule).unwrap();
+        out.split_whitespace().nth(5).unwrap().to_string()
+    }
+
+    #[test]
+    fn shift_number_maps_both_sunday_aliases_to_one() {
+        assert_eq!(shift_number(0), 1);
+        assert_eq!(shift_number(7), 1);
+    }
+
+    #[test]
+    fn shift_number_shifts_other_weekdays_up_by_one() {
+        assert_eq!(shift_number(1), 2);
+        assert_eq!(shift_number(6), 7);
+    }
+
+    #[test]
+    fn to_quartz_shifts_a_bare_sunday_number() {
+        assert_eq!(quartz_dow_of("0 9 * * 0 /usr/bin/backup.sh"), "1");
+    }
+
+    #[test]
+    fn to_quartz_shifts_the_sunday_alias_seven() {
+        assert_eq!(quartz_dow_of("0 9 * * 7 /usr/bin/backup.sh"), "1");
+    }
+
+    #[test]
+    fn to_quartz_named_weekday_range_is_unchanged() {
+        assert_eq!(quartz_dow_of("0 9 * * MON-FRI /usr/bin/backup.sh"), "MON-FRI");
+    }
+
+    #[test]
+    fn to_quartz_shifts_a_range_that_wraps_through_the_sunday_alias() {
+        // Cron's 5-7 is Fri-Sat-Sun; shifted that's 6, 7, 1, which isn't
+        // contiguous once sorted, so it must render as an explicit list.
+        assert_eq!(quartz_dow_of("0 9 * * 5-7 /usr/bin/backup.sh"), "1,6,7");
+    }
+
+    #[test]
+    fn to_quartz_shifts_a_step_that_lands_on_the_sunday_alias() {
+        // Cron's 1/2 (starting Mon, every other day to the field's upper
+        // bound of 7) expands to 1,3,5,7; shifted that's 2,4,6,1.
+        assert_eq!(quartz_dow_of("0 9 * * 1/2 /usr/bin/backup.sh"), "1,2,4,6");
+    }
+
+    #[test]
+    fn to_quartz_shifts_a_step_with_an_any_base() {
+        // "*/3" bases at cron's lower bound 0 and steps to 7: 0,3,6 -> 1,4,7.
+        assert_eq!(quartz_dow_of("0 9 * * */3 /usr/bin/backup.sh"), "1,4,7");
+    }
+
+    #[test]
+    fn to_quartz_shifts_each_entry_of_a_comma_list_independently() {
+        // Each comma-separated atom is shifted on its own, so 0 and 7 (both
+        // aliasing Sunday) each become 1 rather than collapsing into one.
+        assert_eq!(quartz_dow_of("0 9 * * 0,1,7 /usr/bin/backup.sh"), "1,2,1");
+    }
+
+    #[test]
+    fn to_quartz_rejects_both_day_fields_specified() {
+        let schedule = cron::parse_line("0 9 15 * 1 /usr/bin/backup.sh", 1).unwrap();
+        let err = to_quartz(&schedule).unwrap_err();
+        assert!(err.message.contains("either a day-of-month or a day-of-week"));
+    }
+}
+
+#[cfg(test)]
+mod to_standard_tests {
+    use super::*;
+    use crate::cron;
+    use crate::quartz;
+
+    fn standard_dow_of(quartz_line: &str) -> String {
+        let schedule = quartz::parse_line(quartz_line, 1).unwrap();
+        let out = to_standard(&schedule).unwrap();
+        out.split_whitespace().nth(4).unwrap().to_string()
+    }
+
+    #[test]
+    fn unshift_number_reverses_shift_number_for_named_sunday() {
+        assert_eq!(unshift_number(1), 0);
+        assert_eq!(unshift_number(7), 6);
+    }
+
+    #[test]
+    fn to_standard_unshifts_a_bare_sunday_number() {
+        assert_eq!(standard_dow_of("0 0 9 ? * 1 /usr/bin/backup.sh"), "0");
+    }
+
+    #[test]
+    fn to_standard_named_weekday_range_is_unchanged() {
+        assert_eq!(standard_dow_of("0 0 9 ? * MON-FRI /usr/bin/backup.sh"), "MON-FRI");
+    }
+
+    #[test]
+    fn to_standard_unshifts_a_range_spanning_past_sunday() {
+        // Quartz's 5-7 (Thu-Fri-Sat) unshifts to 4-6.
+        assert_eq!(standard_dow_of("0 0 9 ? * 5-7 /usr/bin/backup.sh"), "4-6");
+    }
+
+    #[test]
+    fn to_standard_unshifts_a_step_with_an_any_base() {
+        // "*/3" in Quartz bases at 1 and steps to 7: 1,4,7 -> unshifted 0,3,6.
+        assert_eq!(standard_dow_of("0 0 9 ? * */3 /usr/bin/backup.sh"), "0,3,6");
+    }
+
+    #[test]
+    fn round_trips_a_shifted_weekday_through_both_directions() {
+        let forward = cron::parse_line("0 9 * * 5 /usr/bin/backup.sh", 1).unwrap();
+        let quartz_line = to_quartz(&forward).unwrap();
+        let back = quartz::parse_line(&quartz_line, 1).unwrap();
+        let standard_line = to_standard(&back).unwrap();
+        assert_eq!(standard_line, "0 9 * * 5 /usr/bin/backup.sh");
+    }
+}
+
 fn unshift_number(quartz: u32) -> u32 {
     quartz - 1
 }
