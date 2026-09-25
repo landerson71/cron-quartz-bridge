@@ -114,6 +114,12 @@ error: quartz has no way to express a schedule that fires on either a day-of-mon
   |         ^
 ```
 
+Error output is colorized when stderr is a terminal (the `error:` label,
+the `-->` location line, and the caret are highlighted the way a compiler's
+would be). It's disabled automatically when stderr is redirected to a file
+or pipe, and can be turned off explicitly by setting `NO_COLOR` to any
+value.
+
 ## Current limitations
 
 - Forward conversion (crontab to Quartz) never emits a year field, since

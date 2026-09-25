@@ -5,7 +5,7 @@ mod quartz;
 
 use std::env;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -47,6 +47,10 @@ fn main() -> ExitCode {
         }
     };
 
+    // Respect the NO_COLOR convention (https://no-color.org) and skip escape
+    // codes entirely when stderr isn't a terminal, e.g. when piped to a file.
+    let color = env::var_os("NO_COLOR").is_none() && io::stderr().is_terminal();
+
     let mut had_error = false;
     for (i, line) in source.lines().enumerate() {
         let line_no = i + 1;
@@ -64,7 +68,7 @@ fn main() -> ExitCode {
             Ok(converted) => println!("{}", converted),
             Err(err) => {
                 had_error = true;
-                eprintln!("{}", err.render(line, &file_label));
+                eprintln!("{}", err.render(line, &file_label, color));
             }
         }
     }
