@@ -16,10 +16,13 @@ fn main() -> ExitCode {
     }
 
     let mut reverse = false;
+    let mut no_color = false;
     let mut positional: Vec<String> = Vec::new();
     for arg in args.iter().skip(1) {
         if arg == "-r" || arg == "--reverse" {
             reverse = true;
+        } else if arg == "--no-color" {
+            no_color = true;
         } else {
             positional.push(arg.clone());
         }
@@ -49,7 +52,9 @@ fn main() -> ExitCode {
 
     // Respect the NO_COLOR convention (https://no-color.org) and skip escape
     // codes entirely when stderr isn't a terminal, e.g. when piped to a file.
-    let color = env::var_os("NO_COLOR").is_none() && io::stderr().is_terminal();
+    // --no-color is an explicit override for cases where the environment
+    // can't be changed, e.g. a CI runner that sets its own terminal vars.
+    let color = !no_color && env::var_os("NO_COLOR").is_none() && io::stderr().is_terminal();
 
     let mut had_error = false;
     for (i, line) in source.lines().enumerate() {
@@ -81,11 +86,14 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: cronvert [-r|--reverse] [FILE]");
+    eprintln!("usage: cronvert [-r|--reverse] [--no-color] [FILE]");
     eprintln!();
     eprintln!("Reads standard 5-field crontab lines from FILE (or stdin if omitted)");
     eprintln!("and prints the equivalent Quartz cron expression for each line.");
     eprintln!();
     eprintln!("With -r/--reverse, reads 6-field Quartz cron expressions instead and");
     eprintln!("prints the equivalent standard crontab line for each one.");
+    eprintln!();
+    eprintln!("--no-color disables colored error output regardless of NO_COLOR or");
+    eprintln!("whether stderr is a terminal.");
 }

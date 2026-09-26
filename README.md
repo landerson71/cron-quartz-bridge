@@ -118,7 +118,8 @@ Error output is colorized when stderr is a terminal (the `error:` label,
 the `-->` location line, and the caret are highlighted the way a compiler's
 would be). It's disabled automatically when stderr is redirected to a file
 or pipe, and can be turned off explicitly by setting `NO_COLOR` to any
-value.
+value or passing `--no-color`. The flag is for cases where the environment
+can't be changed, e.g. a CI runner that reports its output as a terminal.
 
 ## Current limitations
 
